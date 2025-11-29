@@ -1,0 +1,5 @@
+{
+  "name": "Scientific Poster AI Designer",
+  "description": "An AI-powered application to automatically design scientific research posters. Provide a design prompt and your research content, and let the AI generate a structured, visually appealing poster layout for you.",
+  "requestFramePermissions": []
+}
