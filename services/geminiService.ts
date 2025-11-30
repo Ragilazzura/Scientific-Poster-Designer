@@ -1,16 +1,20 @@
-
 import { GoogleGenAI, Type, Chat } from "@google/genai";
 import type { PosterData, PosterSection } from '../types';
 
 const posterSchema = {
     type: Type.OBJECT,
     properties: {
-        title: { type: Type.STRING, description: "The main title of the research poster." },
+        title: { type: Type.STRING, description: "EXTRACT THE EXACT TITLE from the uploaded document. Do NOT rewrite, summarize, or make it 'punchy'. Use the verbatim title found in the source text. Only shorten if it exceeds 30 words." },
         authors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "A list of author names." },
         university: { type: Type.STRING, description: "The name of the university or institution." },
         department: { type: Type.STRING, description: "The specific department within the university." },
         rightLogoUrl: { type: Type.STRING, description: "URL for the main institution logo (top right). Leave empty string if not clearly available." },
         leftLogoUrl: { type: Type.STRING, description: "URL for a secondary logo (top left). Leave empty string if not clearly available." },
+        warnings: { 
+            type: Type.ARRAY, 
+            items: { type: Type.STRING }, 
+            description: "Only add warnings if you are 100% CERTAIN the content is completely absent after deep analysis. Do not warn if you successfully inferred the section from other parts." 
+        },
         theme: {
             type: Type.OBJECT,
             properties: {
@@ -27,12 +31,12 @@ const posterSchema = {
         },
         sections: {
             type: Type.ARRAY,
-            description: "An array of poster sections. IMPORTANT: If the source text divides 'Findings' or 'Results' into specific subsections (e.g., 'Result A', 'Result B'), generate SEPARATE sections for each in the array. Do not combine them if they are distinct in the source text.",
+            description: "An array of poster sections. You MUST cover the standard scientific flow: Abstract, Intro, Methods, Results (Split by key finding), Discussion, Conclusion, Recommendations, References.",
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    title: { type: Type.STRING, description: "The title of the section (e.g., 'Introduction', 'Results: Phase 1', 'Results: Phase 2')." },
-                    content: { type: Type.STRING, description: "Concise paragraph content. Summarize heavily. Scientific posters should not be walls of text." },
+                    title: { type: Type.STRING, description: "The title of the section (e.g., 'Introduction', 'Results: Student Engagement'). MUST be distinct." },
+                    content: { type: Type.STRING, description: "Information-dense content. Mix short descriptive paragraphs (3-4 sentences) with bullet points. Max 100 words per card." },
                     column: { type: Type.STRING, description: "The column number ('1' or '2').", enum: ['1', '2'] },
                     design: {
                         type: Type.OBJECT,
@@ -44,19 +48,19 @@ const posterSchema = {
                     },
                     visuals: {
                         type: Type.ARRAY,
-                        description: "Include visual elements (charts/tables/images) ONLY if the section is 'Results', 'Findings', or 'Data Analysis'.",
+                        description: "Include visual elements (charts/tables/images) for Results/Findings/Methods.",
                         items: {
                             type: Type.OBJECT,
                             properties: {
                                 type: { type: Type.STRING, description: "The type of visual.", enum: ['donutChart', 'lineChart', 'barChart', 'image', 'table'] },
-                                items: { type: Type.ARRAY, description: "For donut charts. Limit to 5-6 key items.", items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, value: { type: Type.NUMBER }, color: { type: Type.STRING } } } },
-                                labels: { type: Type.ARRAY, description: "For line/bar charts (X-axis). Limit to max 8 labels to keep JSON valid.", items: { type: Type.STRING } },
-                                datasets: { type: Type.ARRAY, description: "For line/bar charts. Limit to max 2 datasets with max 8 data points each.", items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, data: { type: Type.ARRAY, items: { type: Type.NUMBER } }, color: { type: Type.STRING } } } },
-                                url: { type: Type.STRING, description: "For images. Use `https://image.pollinations.ai/prompt/<encoded_keywords>?width=1024&height=1024&nologo=true`." },
+                                items: { type: Type.ARRAY, description: "For donut charts.", items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, value: { type: Type.NUMBER }, color: { type: Type.STRING } } } },
+                                labels: { type: Type.ARRAY, description: "For line/bar charts (X-axis).", items: { type: Type.STRING } },
+                                datasets: { type: Type.ARRAY, description: "For line/bar charts.", items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, data: { type: Type.ARRAY, items: { type: Type.NUMBER } }, color: { type: Type.STRING } } } },
+                                url: { type: Type.STRING, description: "Image URL. Format: `https://image.pollinations.ai/prompt/<keywords>?nologo=true`." },
                                 caption: { type: Type.STRING },
                                 style: { type: Type.STRING, enum: ['normal', 'circular'] },
-                                headers: { type: Type.ARRAY, description: "For tables. Max 4 columns.", items: { type: Type.STRING } },
-                                rows: { type: Type.ARRAY, description: "For tables. Max 5 rows.", items: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } } }
+                                headers: { type: Type.ARRAY, description: "For tables.", items: { type: Type.STRING } },
+                                rows: { type: Type.ARRAY, description: "For tables.", items: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } } }
                             }
                         }
                     }
@@ -81,55 +85,96 @@ const posterSchema = {
 };
 
 const systemInstruction = `You are a World-Class Scientific Poster Designer.
-Your goal is to take raw research text and transform it into a visually stunning, structurally sound Vertical (Portrait) 2-column poster.
+Your goal is to extract the content from the research text and layout it into a Vertical (Portrait) 2-column poster.
 
-**CORE RESPONSIBILITIES:**
+**CORE PRINCIPLE: INTELLIGENT EXTRACTION & FIDELITY**
+1.  **EXACT TITLE:** Use the **Exact Title** from the document.
+2.  **DEEP READING:** The uploaded document might have different headers or merged sections. You must **INFER** the standard scientific structure.
+    *   *Example:* If there is no "Methodology" header, look for "Procedure", "Study Design", or text describing *how* the study was done.
+    *   *Example:* If there is no "Conclusion" header, extract the final summarizing paragraphs.
+    *   *Example:* "Recommendations" are often hidden at the end of "Discussion" or "Conclusion". Extract them!
+3.  **NO HALLUCINATIONS:** Do not invent data. However, you SHOULD reorganize existing text into the required sections.
+4.  **NO EARLY STOPS:** You MUST generate the FULL poster structure from Abstract to References.
 
-1.  **MANDATORY STRUCTURE (2 Columns for Vertical Layout):**
-    *   **Column 1 (Left):** 'Abstract', 'Introduction', 'Objectives', 'Methodology'.
-    *   **Column 2 (Right):** 'Results', 'Findings', 'Analysis', 'Discussion', 'Conclusion', 'Future Work'.
+**REQUIRED STRUCTURE (DO NOT SKIP):**
+1.  **Abstract** (Summary)
+2.  **Introduction / Objectives** (Context & Goals)
+3.  **Methodology** (How it was done)
+4.  **Results / Findings** (CRITICAL: Split by key finding. If text lists Finding 1, 2, 3... create separate cards.)
+5.  **Discussion** (Interpretation)
+6.  **Conclusion** (Summary of impact - **MUST GENERATE**, infer from end of text if needed)
+7.  **Recommendations** (Practical applications - **MUST GENERATE**, look in Discussion/Conclusion if missing)
+8.  **References** (If citations exist)
 
-2.  **HANDLING RESULTS & FINDINGS (CRITICAL):**
-    *   **Respect Source Granularity:** Check the input text carefully.
-    *   **Scenario A (Split Findings):** If the research text breaks findings into specific sub-topics (e.g., "Experiment 1 Results", "Survey Demographics", "Performance Benchmarks"), you MUST create **separate sections/cards** for each of these in Column 2. Do NOT merge them into one generic "Results" section.
-    *   **Scenario B (Unified Findings):** If the research text has a single, continuous findings section, create one single "Results" section in Column 2.
-    *   **Visuals:** Each specific result section in Column 2 should have its own relevant charts or tables in the \`visuals\` array.
+**RESULTS SPLITTING RULE:**
+*   If the text lists distinct findings (e.g., Finding 1, Finding 2), create a **SEPARATE SECTION** for each.
+*   **Titles:** Use specific titles like "Results: [Topic]".
 
-3.  **Visual Placement Rules:**
-    *   **ONLY** generate charts/visuals for sections in Column 2 (Results/Findings).
-    *   **DO NOT** generate visuals for 'Introduction', 'Methodology', 'Discussion', or 'Conclusion'.
-    *   **Constraint:** Keep datasets small (max 8 points) to ensure the JSON response is valid.
-
-4.  **Content Quality:**
-    *   **Summarize Heavily:** Create punchy, readable paragraphs.
-    *   **Completeness:** Do NOT truncate lists, but summarize descriptions.
-    *   **Escaping:** Use single quotes for emphasis within text to avoid breaking JSON (e.g., 'Tour-Vlog'). **NEVER use double quotes inside a JSON string without escaping them.** Incorrect: "The "Project"". Correct: "The \\"Project\\"".
-
-5.  **Design Logic:**
-    *   **Theme:** Pick colors that match the scientific field.
-    *   **Logos:** Default to empty string unless provided.
-
-**CRITICAL JSON FORMATTING:**
-*   You must return **strictly valid JSON**.
-*   **Verify Commas:** Ensure every object in an array (sections, visuals, datasets) is separated by a comma.
-*   **Verify Strings:** Ensure every string in a list (authors, labels) is separated by a comma.
-*   Do not leave trailing commas at the end of lists.
-*   Do not output markdown text outside the JSON block.`;
+**CONTENT STYLE:**
+*   **Dense & Concise:** Use short, information-dense paragraphs (3-4 sentences) mixed with bullet points.
+*   **Word Count:** Target ~80-100 words per section to ensure the entire poster fits within the token limit.
+*   **Layout:** Col 1 (Abstract -> Methods). Col 2 (Results -> References).
+`;
 
 // Helper to sanitize and deduplicate sections
-const sanitizeData = (data: PosterData): PosterData => {
-    if (!data || !data.sections || !Array.isArray(data.sections)) {
-        return data;
+const sanitizeData = (data: any): PosterData => {
+    // Default structure to prevent crashes if JSON is partial
+    const defaultData: PosterData = {
+        title: "Untitled Poster",
+        authors: [],
+        university: "Unknown University",
+        department: "Unknown Department",
+        theme: {
+            backgroundColor: "#F0F4F8",
+            headerColor: "#2C3E50",
+            titleColor: "#FFFFFF",
+            headingColor: "#1A5276",
+            textColor: "#34495E",
+            accentColor: "#3498DB",
+            sectionBackgroundColor: "#FFFFFF",
+            sectionBodyColor: "#34495E"
+        },
+        sections: [],
+        contactInfo: {
+            email: "",
+            phone: "",
+            location: "",
+            website: "",
+            qrCodeUrl: ""
+        },
+        leftLogoUrl: "",
+        rightLogoUrl: "",
+        warnings: []
+    };
+
+    if (!data || typeof data !== 'object') {
+        return defaultData;
     }
 
-    const seen = new Set<string>();
-    const uniqueSections: PosterSection[] = [];
+    // Merge logic
+    const mergedData = { ...defaultData, ...data };
+    
+    // Ensure nested objects exist
+    if (data.theme) mergedData.theme = { ...defaultData.theme, ...data.theme };
+    if (data.contactInfo) mergedData.contactInfo = { ...defaultData.contactInfo, ...data.contactInfo };
+    if (data.warnings && Array.isArray(data.warnings)) mergedData.warnings = data.warnings;
 
-    data.sections.forEach(section => {
-        // 1. Sanitize Column
+    if (!mergedData.sections || !Array.isArray(mergedData.sections)) {
+        mergedData.sections = [];
+    }
+
+    // --- SMART DEDUPLICATION & MERGING LOGIC ---
+    const uniqueSections: PosterSection[] = [];
+    const titleMap = new Map<string, PosterSection>();
+
+    mergedData.sections.forEach((section: any) => {
+        // 1. Ensure ID exists
+        if (!section.id) {
+            section.id = `section-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`;
+        }
+
+        // 2. Sanitize Column
         let col = String(section.column).replace(/column\s*/i, '').trim();
-        
-        // Intelligent column assignment based on title keywords if column is weird
         if (!['1', '2'].includes(col)) {
             const titleLower = section.title?.toLowerCase() || '';
             if (titleLower.includes('abstract') || titleLower.includes('intro') || titleLower.includes('method') || titleLower.includes('objective')) {
@@ -138,50 +183,65 @@ const sanitizeData = (data: PosterData): PosterData => {
                 col = '2'; 
             }
         }
-        section.column = col as '1' | '2' | '3'; // Keep types compatible, but logic enforces 1 or 2
+        section.column = col as '1' | '2' | '3'; 
 
-        // 2. Normalize Visuals to Array (Legacy compatibility)
+        // 3. Normalize Visuals to Array
         if (section.visual) {
-            if (!section.visuals) {
-                section.visuals = [];
-            }
+            if (!section.visuals) section.visuals = [];
             section.visuals.push(section.visual);
             delete section.visual;
         }
-        // Ensure visuals array exists
-        if (!section.visuals) {
-            section.visuals = [];
-        }
+        if (!section.visuals) section.visuals = [];
 
-        // 3. Create fingerprint (Title + Content) to detect duplicates
-        const fingerprint = `${section.title?.trim().toLowerCase()}|${section.content?.trim().toLowerCase()}`;
+        // 4. MERGING LOGIC based on TITLE
+        // We normalize the title (lowercase, trimmed) to find duplicates
+        const normalizedTitle = section.title?.trim().toLowerCase();
+        
+        // Exception: Do not merge "Results" if they have different suffixes like "Results: A" vs "Results: B"
+        // But if exact duplicate "Results", merge them.
+        if (titleMap.has(normalizedTitle)) {
+            // Found a duplicate title! Merge content instead of deleting.
+            const existingSection = titleMap.get(normalizedTitle)!;
+            
+            // Append content if it's not exactly the same
+            if (section.content && !existingSection.content.includes(section.content.substring(0, 50))) {
+                 existingSection.content += "\n\n" + section.content;
+            }
 
-        if (!seen.has(fingerprint)) {
-            seen.add(fingerprint);
+            // Append visuals
+            if (section.visuals && section.visuals.length > 0) {
+                existingSection.visuals = [...(existingSection.visuals || []), ...section.visuals];
+            }
+        } else {
+            // New unique section
+            titleMap.set(normalizedTitle, section);
             uniqueSections.push(section);
         }
     });
 
-    data.sections = uniqueSections;
-    return data;
+    mergedData.sections = uniqueSections;
+    return mergedData;
 };
 
 const parseJsonResponse = (text: string): PosterData | { error: string } => {
     // 1. Clean markdown code blocks
     let cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-    // 2. Balanced Brace Extractor (String Aware & Auto-Repair)
+    // 2. Balanced Brace Extractor (String Aware & Stack-Based Auto-Repair)
     const extractBalancedJSON = (str: string) => {
         const start = str.indexOf('{');
         if (start === -1) return str;
 
-        let openBraces = 0; // {
-        let openBrackets = 0; // [
+        const stack: string[] = [];
         let inString = false;
         let escape = false;
-
-        for (let i = start; i < str.length; i++) {
-            const char = str[i];
+        
+        // We look for the end of the JSON structure
+        const jsonStr = str.substring(start);
+        let i = 0;
+        
+        for (i = 0; i < jsonStr.length; i++) {
+            const char = jsonStr[i];
             
             if (inString) {
                 if (escape) {
@@ -195,27 +255,34 @@ const parseJsonResponse = (text: string): PosterData | { error: string } => {
                 if (char === '"') {
                     inString = true;
                 } else if (char === '{') {
-                    openBraces++;
-                } else if (char === '}') {
-                    openBraces--;
+                    stack.push('}');
                 } else if (char === '[') {
-                    openBrackets++;
-                } else if (char === ']') {
-                    openBrackets--;
+                    stack.push(']');
+                } else if (char === '}' || char === ']') {
+                     if (stack.length > 0 && stack[stack.length - 1] === char) {
+                        stack.pop();
+                    }
                 }
-
-                if (openBraces === 0 && openBrackets === 0 && i > start) {
-                    // Found complete object
-                    return str.substring(start, i + 1);
-                }
+            }
+            
+            // If stack is empty and we have processed content, we are done
+            if (stack.length === 0 && i > 0) {
+                 return str.substring(start, start + i + 1);
             }
         }
         
-        // Auto-repair truncated JSON
-        let repaired = str.substring(start);
-        if (inString) repaired += '"';
-        while (openBrackets > 0) { repaired += ']'; openBrackets--; }
-        while (openBraces > 0) { repaired += '}'; openBraces--; }
+        // If we reach here, the JSON is truncated or malformed.
+        // Auto-repair logic:
+        let repaired = jsonStr;
+        
+        if (inString) {
+            repaired += '"';
+        }
+        
+        // Close remaining open structures in reverse order
+        while (stack.length > 0) {
+            repaired += stack.pop();
+        }
         
         return repaired;
     };
@@ -223,7 +290,7 @@ const parseJsonResponse = (text: string): PosterData | { error: string } => {
     cleanText = extractBalancedJSON(cleanText);
 
     try {
-        const rawData = JSON.parse(cleanText) as PosterData;
+        const rawData = JSON.parse(cleanText);
         return sanitizeData(rawData);
 
     } catch (e: any) {
@@ -245,7 +312,7 @@ const parseJsonResponse = (text: string): PosterData | { error: string } => {
                 'value', 'color', 'data',
                 'email', 'phone', 'location', 'website', 'qrCodeUrl',
                 // Updated keys
-                'design', 'icon', 'variant', 'customColor'
+                'design', 'icon', 'variant', 'customColor', 'warnings'
              ];
              // Matches: "value" "key": -> "value", "key":
              const keyRegex = new RegExp(`"\\s+"(${knownKeys.join('|')})":`, 'g');
@@ -296,11 +363,12 @@ const parseJsonResponse = (text: string): PosterData | { error: string } => {
              // e.g. Vlog" project -> Vlog\" project
              fixedText = fixedText.replace(/([a-zA-Z0-9])"\s+([a-zA-Z0-9.,;!?])/g, '$1\\" $2');
              
-             const rawData = JSON.parse(fixedText) as PosterData;
+             const rawData = JSON.parse(fixedText);
              return sanitizeData(rawData);
         } catch (e2) {
              const errorDetails = e instanceof Error ? e.message : String(e);
              console.error("JSON fixing failed:", errorDetails);
+             console.warn("Fixed JSON:", cleanText); // Log attempted fix
              return { error: `We encountered a formatting issue with the AI's response. Please try generating again, or use a shorter input text to reduce complexity.` };
         }
     }
@@ -311,22 +379,25 @@ export const startPosterChat = async (
     fileContent: string,
     setLoadingMessage: (message: string) => void
 ): Promise<{ posterData?: PosterData; chat?: Chat; error?: string }> => {
-    setLoadingMessage("Analyzing research data for visual opportunities...");
+    setLoadingMessage("Analyzing research data and identifying gaps...");
     
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+    // Switched back to 'gemini-2.5-flash' for speed.
+    // It still has 1M context window so it can read long files.
+    // The strict systemInstruction should handle the structure requirements.
     const chat = ai.chats.create({
         model: 'gemini-2.5-flash', 
         config: {
             systemInstruction,
             responseMimeType: 'application/json',
             responseSchema: posterSchema,
-            maxOutputTokens: 8192, // Increased to prevent truncation
         },
     });
 
     // Truncate file content to safe limit
-    const truncatedContent = fileContent.slice(0, 45000); 
+    // 800,000 characters is safe for 1M context window of Flash
+    const truncatedContent = fileContent.slice(0, 800000); 
 
     const initialPrompt = `Design Prompt: "${designPrompt}"\n\nResearch Content (Excerpt):\n---\n${truncatedContent}`;
 
@@ -363,5 +434,24 @@ export const revisePosterData = async (
     } catch (e: any) {
         console.error("Error revising poster:", e);
         return { error: e.message || "An unknown error occurred during revision." };
+    }
+};
+
+export const generateAlternativePoster = async (
+    chat: Chat
+): Promise<PosterData | { error: string }> => {
+    try {
+        const altPrompt = "Create a DISTINCT alternative version of this poster. Change the layout structure (e.g. icon styles, column balance) and the color theme significantly from the previous output. Ensure the content remains scientifically accurate but present it with a different visual strategy. Remember: KEEP CONTENT CONCISE, DENSE AND MIX PARAGRAPHS WITH LISTS. USE THE EXACT TITLE.";
+        const result = await chat.sendMessage({ message: altPrompt });
+        const posterData = parseJsonResponse(result.text);
+
+        if ('error' in posterData) {
+            return { error: posterData.error };
+        }
+        
+        return posterData;
+    } catch (e: any) {
+        console.error("Error generating alternative poster:", e);
+        return { error: e.message || "An unknown error occurred during variation generation." };
     }
 };

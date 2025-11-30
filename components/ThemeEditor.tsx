@@ -64,14 +64,14 @@ const predefinedPalettes: { name: string; theme: PosterTheme }[] = [
 ];
 
 const colorFields: { key: keyof PosterTheme; label: string }[] = [
-    { key: 'backgroundColor', label: 'Page Background' },
-    { key: 'headerColor', label: 'Header/Footer' },
+    { key: 'backgroundColor', label: 'Canvas' },
+    { key: 'headerColor', label: 'Header & Footer' },
     { key: 'titleColor', label: 'Main Title' },
-    { key: 'headingColor', label: 'Section Headings' },
-    { key: 'textColor', label: 'Primary Text' },
-    { key: 'accentColor', label: 'Accent Color' },
-    { key: 'sectionBackgroundColor', label: 'Section Background' },
-    { key: 'sectionBodyColor', label: 'Section Text' },
+    { key: 'headingColor', label: 'Section Headers' },
+    { key: 'sectionBackgroundColor', label: 'Card Background' },
+    { key: 'sectionBodyColor', label: 'Card Text' },
+    { key: 'textColor', label: 'Global Text' },
+    { key: 'accentColor', label: 'Accents' },
 ];
 
 const ThemeEditor: React.FC<ThemeEditorProps> = ({ theme, onThemeChange }) => {
@@ -80,43 +80,43 @@ const ThemeEditor: React.FC<ThemeEditorProps> = ({ theme, onThemeChange }) => {
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-8 animate-fadeIn">
         <div>
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Quick Palettes</h3>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Preset Themes</h3>
             <div className="grid grid-cols-2 gap-3">
                 {predefinedPalettes.map(palette => (
                     <button 
                         key={palette.name} 
                         onClick={() => onThemeChange(palette.theme)} 
-                        className="p-2.5 border border-slate-200 rounded-lg hover:border-indigo-500 hover:ring-1 hover:ring-indigo-500 transition-all text-left group bg-slate-50 hover:bg-white"
+                        className="p-3 border border-slate-100 rounded-xl hover:border-indigo-500 hover:ring-2 hover:ring-indigo-500/20 transition-all text-left group bg-white shadow-sm hover:shadow-md"
                     >
-                        <span className="text-xs font-semibold text-slate-700 block mb-2">{palette.name}</span>
-                        <div className="flex space-x-0.5 rounded-md overflow-hidden h-4 w-full shadow-sm">
+                        <div className="flex space-x-1 rounded-lg overflow-hidden h-6 w-full shadow-inner mb-2">
                             <div className="flex-1" style={{ backgroundColor: palette.theme.headerColor }}></div>
                             <div className="flex-1" style={{ backgroundColor: palette.theme.headingColor }}></div>
                             <div className="flex-1" style={{ backgroundColor: palette.theme.accentColor }}></div>
                             <div className="flex-1" style={{ backgroundColor: palette.theme.backgroundColor }}></div>
                         </div>
+                        <span className="text-xs font-bold text-slate-700 block">{palette.name}</span>
                     </button>
                 ))}
             </div>
         </div>
         
         <div>
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Custom Colors</h3>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Custom Colors</h3>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-5">
             {colorFields.map(({ key, label }) => (
-                <div key={key} className="flex flex-col gap-1.5">
-                    <label htmlFor={key} className="text-[11px] font-medium text-slate-600">{label}</label>
-                    <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                <div key={key} className="flex flex-col gap-2">
+                    <label htmlFor={key} className="text-xs font-semibold text-slate-600">{label}</label>
+                    <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-400 transition-colors">
                         <input
                             type="color"
                             id={key}
                             value={theme[key]}
                             onChange={(e) => handleColorChange(key, e.target.value)}
-                            className="h-6 w-8 block bg-transparent border-0 p-0 rounded cursor-pointer"
+                            className="h-8 w-8 block bg-transparent border-0 p-0 rounded-lg cursor-pointer shadow-sm"
                         />
-                         <span className="text-[10px] font-mono text-slate-400 uppercase flex-1">{theme[key]}</span>
+                         <span className="text-[10px] font-mono text-slate-500 uppercase flex-1">{theme[key]}</span>
                     </div>
                 </div>
             ))}

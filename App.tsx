@@ -1,12 +1,11 @@
-
-import React, { useState, useCallback, useRef } from 'react';
-import { startPosterChat, revisePosterData } from './services/geminiService';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { startPosterChat, revisePosterData, generateAlternativePoster } from './services/geminiService';
 import type { PosterData, PosterTheme, PosterSection } from './types';
 import type { Chat } from '@google/genai';
 import PosterDisplay from './components/PosterDisplay';
 import Loader from './components/Loader';
 import ThemeEditor from './components/ThemeEditor';
-import { SparklesIcon, UploadIcon, InfoIcon, WandIcon, RestartIcon, DownloadIcon, PaletteIcon, ClipboardCheckIcon, PencilIcon, UndoIcon, RedoIcon } from './components/IconComponents';
+import { SparklesIcon, UploadIcon, InfoIcon, WandIcon, RestartIcon, DownloadIcon, PaletteIcon, ClipboardCheckIcon, PencilIcon, UndoIcon, RedoIcon, ZoomInIcon, ZoomOutIcon, LayersIcon, StarIcon } from './components/IconComponents';
 import { useHistory } from './hooks/useHistory';
 
 // Declare global variables for CDN libraries
@@ -28,17 +27,42 @@ const App: React.FC = () => {
   const [rightLogoDataUrl, setRightLogoDataUrl] = useState<string>('');
   const [rightLogoFileName, setRightLogoFileName] = useState<string>('');
 
+  // Version Control State
+  const [versions, setVersions] = useState<PosterData[]>([]);
+  const [currentVersionIndex, setCurrentVersionIndex] = useState<number>(0);
+
   // History Hook replaces the simple useState
   const history = useHistory<PosterData | null>(null);
   const posterData = history.state;
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isDownloading, setIsDownloading] = useState<boolean>(false); // NEW: Track download state
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [chatSession, setChatSession] = useState<Chat | null>(null);
   const [showThemeEditor, setShowThemeEditor] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const posterRef = useRef<HTMLDivElement>(null);
+
+  // Zoom State
+  const [zoom, setZoom] = useState<number>(0.5);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+
+  // Auto-fit Zoom when poster data loads
+  useEffect(() => {
+    if (posterData && workspaceRef.current) {
+        const { clientWidth } = workspaceRef.current;
+        const PADDING = 80;
+        const posterWidth = 1753; // Updated to match new CSS width
+        const availableWidth = clientWidth - PADDING;
+        const scale = Math.min(1, availableWidth / posterWidth);
+        setZoom(scale < 0.2 ? 0.2 : scale); // Min zoom safety
+    }
+  }, [posterData]);
+
+  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.1, 1.5));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.1, 0.2));
+
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -175,6 +199,8 @@ const App: React.FC = () => {
     }
     setError(null);
     history.clear(null); // Clear history on new generation
+    setVersions([]);
+    setCurrentVersionIndex(0);
     setChatSession(null);
     setIsLoading(true);
     setShowThemeEditor(false);
@@ -193,6 +219,8 @@ const App: React.FC = () => {
         if (leftLogoDataUrl) {
             finalPosterData = { ...finalPosterData, leftLogoUrl: leftLogoDataUrl };
         }
+        setVersions([finalPosterData]);
+        setCurrentVersionIndex(0);
         history.set(finalPosterData);
         setChatSession(result.chat as Chat);
       }
@@ -222,6 +250,11 @@ const App: React.FC = () => {
             if (rightLogoDataUrl) revisedData.rightLogoUrl = rightLogoDataUrl;
             if (leftLogoDataUrl) revisedData.leftLogoUrl = leftLogoDataUrl;
             
+            // Save current state before updating
+            const updatedVersions = [...versions];
+            updatedVersions[currentVersionIndex] = revisedData;
+            setVersions(updatedVersions);
+
             history.set(revisedData);
             setRevisionPrompt(''); // Clear input on success
         }
@@ -231,7 +264,57 @@ const App: React.FC = () => {
         setIsLoading(false);
         setLoadingMessage('');
     }
-  }, [revisionPrompt, chatSession, leftLogoDataUrl, rightLogoDataUrl]);
+  }, [revisionPrompt, chatSession, leftLogoDataUrl, rightLogoDataUrl, versions, currentVersionIndex]);
+
+  // Handle switching between Version tabs
+  const handleSwitchVersion = (index: number) => {
+      if (index === currentVersionIndex || !posterData) return;
+      
+      // Autosave current displayed data back to the array before switching
+      const updatedVersions = [...versions];
+      updatedVersions[currentVersionIndex] = posterData;
+      setVersions(updatedVersions);
+      
+      // Switch
+      setCurrentVersionIndex(index);
+      history.clear(updatedVersions[index]);
+  };
+
+  // Handle generating a new variation
+  const handleCreateVariation = async () => {
+      if (!chatSession || !posterData) return;
+      
+      // Autosave current
+      const updatedVersions = [...versions];
+      updatedVersions[currentVersionIndex] = posterData;
+      setVersions(updatedVersions);
+
+      setIsLoading(true);
+      setLoadingMessage("Designing a new alternative variation...");
+      setError(null);
+
+      try {
+          const result = await generateAlternativePoster(chatSession);
+          if ('error' in result) {
+              setError(result.error);
+          } else {
+               let newData = result as PosterData;
+               // Preserve uploaded logos
+               if (rightLogoDataUrl) newData.rightLogoUrl = rightLogoDataUrl;
+               if (leftLogoDataUrl) newData.leftLogoUrl = leftLogoDataUrl;
+
+               const newVersions = [...updatedVersions, newData];
+               setVersions(newVersions);
+               setCurrentVersionIndex(newVersions.length - 1); // Switch to new one
+               history.clear(newData);
+          }
+      } catch (e: any) {
+          setError(e.message || "Failed to create variation.");
+      } finally {
+          setIsLoading(false);
+          setLoadingMessage('');
+      }
+  };
 
   const handleStartOver = () => {
     setPrompt('A professional and modern design with a blue and gray color scheme. Emphasize the results section.');
@@ -242,6 +325,8 @@ const App: React.FC = () => {
     setRightLogoDataUrl('');
     setRightLogoFileName('');
     history.clear(null);
+    setVersions([]);
+    setCurrentVersionIndex(0);
     setIsLoading(false);
     setError(null);
     setChatSession(null);
@@ -252,71 +337,43 @@ const App: React.FC = () => {
 
   const handleDownload = useCallback(() => {
     if (posterRef.current) {
-        // Temporarily disable editing border before download
         const wasEditing = isEditing;
         if (wasEditing) setIsEditing(false);
+        
+        // 1. Trigger Re-render at 100% scale (no zoom)
+        setIsDownloading(true);
 
         const element = posterRef.current;
         
-        // Wait a tick for UI update (removing edit borders)
+        // 2. Wait for state update and layout paint
         setTimeout(() => {
-            // TARGET: A3 Portrait at 300 DPI
+            // Updated to scale 1 because the element itself is now 1753px wide (exact requested size)
+            // No need to upscale if the CSS width matches the target output.
+            
             html2canvas(element, {
-                scale: 3.1238, 
+                scale: 1, 
                 useCORS: true, 
                 backgroundColor: null,
-                width: 1123, 
-                height: 1588, // 4961 / 3.1238
-                windowWidth: 1123,
-                windowHeight: 1588,
-                // Critical: Manipulate the CLONED DOM to force desktop layout regardless of current viewport
-                onclone: (clonedDoc: Document) => {
-                    const clonedRoot = clonedDoc.querySelector('[data-id="poster-root"]') as HTMLElement;
-                    const clonedGrid = clonedDoc.querySelector('[data-id="poster-grid"]') as HTMLElement;
-                    const desktopHeader = clonedDoc.querySelector('[data-id="header-desktop"]') as HTMLElement;
-                    const mobileHeader = clonedDoc.querySelector('[data-id="header-mobile"]') as HTMLElement;
-
-                    if (clonedRoot) {
-                        clonedRoot.style.width = '1123px'; 
-                        clonedRoot.style.minHeight = '1588px';
-                        const contentHeight = clonedRoot.scrollHeight;
-                        const requiredHeight = Math.max(1588, contentHeight);
-                        clonedRoot.style.height = `${requiredHeight}px`;
-                        clonedRoot.style.aspectRatio = 'unset'; 
-                        clonedRoot.style.maxWidth = 'none';
-                        clonedRoot.style.margin = '0';
-                        clonedRoot.style.transform = 'none';
-                        clonedRoot.style.overflow = 'visible';
-                        clonedRoot.style.paddingBottom = '0px'; 
-                        clonedRoot.style.boxShadow = 'none'; // Remove shadow for download
-                    }
-
-                    if (clonedGrid) {
-                        clonedGrid.style.display = 'flex';
-                        clonedGrid.style.flexDirection = 'row';
-                        clonedGrid.style.flexWrap = 'nowrap';
-                        clonedGrid.style.gap = '16px';
-                    }
-                    if (desktopHeader) {
-                        desktopHeader.classList.remove('hidden');
-                        desktopHeader.style.display = 'flex';
-                    }
-                    if (mobileHeader) {
-                        mobileHeader.style.display = 'none';
-                    }
-                }
+                width: element.offsetWidth, // Explicit width from element (1753px)
+                height: element.offsetHeight, // Explicit height
+                windowWidth: element.offsetWidth + 100, // Virtual window size
+                windowHeight: element.offsetHeight + 100,
             }).then((canvas: HTMLCanvasElement) => {
                 const link = document.createElement('a');
-                link.download = 'scientific-poster-a3-portrait-300dpi.png';
+                link.download = 'scientific-poster-1753x2480.png';
                 link.href = canvas.toDataURL('image/png');
                 link.click();
+                
+                // 3. Restore state
+                setIsDownloading(false);
                 if (wasEditing) setIsEditing(true);
             }).catch((err: Error) => {
                 console.error("Failed to download poster:", err);
                 setError("Sorry, there was an issue downloading the poster image.");
+                setIsDownloading(false);
                 if (wasEditing) setIsEditing(true);
             });
-        }, 100);
+        }, 500); // 500ms delay to allow render cycle to finish at scale(1)
     }
   }, [isEditing]);
   
@@ -356,6 +413,7 @@ const App: React.FC = () => {
   const handleAddSection = (column: '1' | '2' | '3') => {
       if (!posterData) return;
       const newSection: PosterSection = {
+          id: `section-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           title: "New Section",
           content: "Enter your content here...",
           column: column
@@ -379,60 +437,91 @@ const App: React.FC = () => {
   const isRevisionDisabled = !revisionPrompt || isLoading;
 
   // Component Reusable Styles
-  const cardStyle = "bg-white rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-slate-100 p-4 transition-all hover:shadow-md";
-  const labelStyle = "block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2";
-  const inputStyle = "w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all";
-  const secondaryButtonStyle = "w-full py-2 px-3 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 hover:text-slate-800 transition shadow-sm flex items-center justify-center gap-2 active:scale-95";
+  const cardStyle = "bg-white rounded-2xl shadow-sm border border-slate-100 p-5 transition-all hover:shadow-md";
+  const labelStyle = "block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3";
+  const inputStyle = "w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all";
+  const secondaryButtonStyle = "w-full py-2.5 px-4 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 hover:text-slate-900 transition shadow-sm flex items-center justify-center gap-2 active:scale-95";
 
   return (
-    <div className="flex flex-col lg:flex-row bg-slate-50 font-sans min-h-screen lg:h-screen lg:overflow-hidden">
+    <div className="flex flex-col lg:flex-row bg-slate-50 font-sans h-screen overflow-hidden">
       
       {/* --- SIDEBAR / CONTROL PANEL --- */}
-      <aside className="w-full lg:w-[380px] xl:w-[420px] bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col lg:h-full lg:overflow-y-auto z-20 shrink-0 relative">
-        <div className="p-6 space-y-6">
-            {/* App Header */}
-            <header className="flex items-center gap-3 pb-4 border-b border-slate-100">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+      <aside className="w-full lg:w-[400px] xl:w-[440px] bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col h-full z-20 shrink-0 relative">
+        <div className="p-6 pb-2 shrink-0">
+             {/* App Header */}
+            <header className="flex items-center gap-4 pb-6 border-b border-slate-100">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-indigo-200 ring-4 ring-indigo-50">
                     <SparklesIcon className="w-6 h-6" />
                 </div>
                 <div>
-                    <h1 className="text-xl font-bold text-slate-900 leading-tight">Poster AI</h1>
-                    <p className="text-xs text-slate-500 font-medium">Research Design Assistant</p>
+                    <h1 className="text-xl font-extrabold text-slate-900 leading-none">Poster AI</h1>
+                    <p className="text-xs text-slate-500 font-medium mt-1">Research Design Assistant</p>
                 </div>
             </header>
+        </div>
 
+        <div className="flex-1 overflow-y-auto p-6 pt-0 scroll-smooth">
             {posterData && chatSession ? (
               /* --- REVISION MODE --- */
-              <div className="space-y-6 animate-fadeIn">
+              <div className="space-y-6 animate-fadeIn py-4">
+                 
+                 {/* VERSION CONTROL UI */}
                  <div>
-                    <h2 className="text-lg font-bold text-slate-800 mb-1">Refine Design</h2>
-                    <p className="text-sm text-slate-500">Tweak your poster to perfection.</p>
+                    <div className="flex items-center justify-between mb-2">
+                        <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <LayersIcon className="w-5 h-5 text-slate-400" />
+                            Versions
+                        </h2>
+                        <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-semibold">Auto-saving</span>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                        {versions.map((_, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => handleSwitchVersion(idx)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap border ${idx === currentVersionIndex ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'}`}
+                            >
+                                Option {String.fromCharCode(65 + idx)}
+                            </button>
+                        ))}
+                        <button
+                            onClick={handleCreateVariation}
+                            disabled={isLoading}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-500 text-white border border-transparent shadow-sm hover:shadow-md flex items-center gap-1 whitespace-nowrap transition transform active:scale-95"
+                        >
+                            <StarIcon className="w-3 h-3" /> New Variant
+                        </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-2 italic">
+                        Don't like this look? Click "New Variant" to generate a different design approach while keeping your content.
+                    </p>
                  </div>
 
+                 <hr className="border-slate-100" />
+
                  {/* Undo/Redo Controls */}
-                 <div className="flex gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                    <button onClick={history.undo} disabled={!history.canUndo} className={`flex-1 flex items-center justify-center py-1.5 rounded-md text-sm transition ${!history.canUndo ? 'text-slate-300' : 'bg-white shadow-sm text-slate-700 hover:text-indigo-600'}`}>
-                        <UndoIcon className="w-4 h-4 mr-1.5" /> Undo
+                 <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
+                    <button onClick={history.undo} disabled={!history.canUndo} className={`flex-1 flex items-center justify-center py-2 rounded-lg text-xs font-semibold transition ${!history.canUndo ? 'text-slate-400 cursor-not-allowed' : 'bg-white shadow-sm text-slate-700 hover:text-indigo-600'}`}>
+                        <UndoIcon className="w-3.5 h-3.5 mr-1.5" /> Undo
                     </button>
-                    <div className="w-px bg-slate-200 my-1"></div>
-                    <button onClick={history.redo} disabled={!history.canRedo} className={`flex-1 flex items-center justify-center py-1.5 rounded-md text-sm transition ${!history.canRedo ? 'text-slate-300' : 'bg-white shadow-sm text-slate-700 hover:text-indigo-600'}`}>
-                        Redo <RedoIcon className="w-4 h-4 ml-1.5" />
+                    <button onClick={history.redo} disabled={!history.canRedo} className={`flex-1 flex items-center justify-center py-2 rounded-lg text-xs font-semibold transition ${!history.canRedo ? 'text-slate-400 cursor-not-allowed' : 'bg-white shadow-sm text-slate-700 hover:text-indigo-600'}`}>
+                        Redo <RedoIcon className="w-3.5 h-3.5 ml-1.5" />
                     </button>
                  </div>
 
                  {/* Manual Edit Toggle */}
                  <button
                     onClick={() => setIsEditing(!isEditing)}
-                    className={`w-full py-3 px-4 rounded-xl font-semibold text-sm transition-all flex items-center justify-center shadow-sm border ${isEditing ? 'bg-indigo-50 border-indigo-200 text-indigo-700 ring-1 ring-indigo-200' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'}`}
+                    className={`w-full py-4 px-4 rounded-2xl font-bold text-sm transition-all flex items-center justify-center shadow-sm border-2 ${isEditing ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-100 text-slate-600 hover:border-indigo-200 hover:text-indigo-600'}`}
                  >
-                      <PencilIcon className={`w-4 h-4 mr-2 ${isEditing ? 'animate-pulse' : ''}`} />
+                      <PencilIcon className={`w-5 h-5 mr-3 ${isEditing ? 'animate-bounce' : ''}`} />
                       {isEditing ? 'Exit Manual Edit Mode' : 'Enter Manual Edit Mode'}
                  </button>
 
-                 <div className="space-y-4">
+                 <div className="space-y-5">
                     <div className={cardStyle}>
                         <label htmlFor="revision-prompt" className={labelStyle}>
-                            AI Revision
+                            AI Assistant
                         </label>
                         <textarea
                             id="revision-prompt"
@@ -440,111 +529,116 @@ const App: React.FC = () => {
                             className={inputStyle}
                             value={revisionPrompt}
                             onChange={(e) => setRevisionPrompt(e.target.value)}
-                            placeholder="e.g. Change the title color to navy blue, make the charts bigger..."
+                            placeholder="Tell AI to change colors, restructure content, or summarize better..."
                         />
                          <button
                             onClick={handleRevisionSubmit}
                             disabled={isRevisionDisabled}
-                            className={`mt-3 w-full py-2.5 rounded-lg text-white font-semibold text-sm shadow-md transition-all flex items-center justify-center ${isRevisionDisabled ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg active:scale-[0.98]'}`}
+                            className={`mt-4 w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all flex items-center justify-center ${isRevisionDisabled ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg active:scale-[0.98]'}`}
                         >
-                            {isLoading ? 'Processing...' : <><WandIcon className="w-4 h-4 mr-2" /> Apply Changes</>}
+                            {isLoading ? 'Processing...' : <><WandIcon className="w-4 h-4 mr-2" /> Apply with AI</>}
                         </button>
                     </div>
 
                     <div className={cardStyle}>
-                        <label className={labelStyle}>Logos</label>
+                        <label className={labelStyle}>Institution Logos</label>
                          {/* Left Logo */}
-                        <div className="flex items-center justify-between mb-3 p-2 bg-slate-50 rounded-lg border border-slate-100">
+                        <div className="flex items-center justify-between mb-3 p-3 bg-slate-50 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors group">
                              <div className="flex items-center gap-3 overflow-hidden">
                                 {leftLogoDataUrl ? (
-                                    <img src={leftLogoDataUrl} className="w-8 h-8 object-contain bg-white rounded border border-slate-200 p-0.5" />
+                                    <div className="w-10 h-10 bg-white rounded-lg border border-slate-200 p-1 flex items-center justify-center">
+                                        <img src={leftLogoDataUrl} className="max-w-full max-h-full object-contain" />
+                                    </div>
                                 ) : (
-                                    <div className="w-8 h-8 bg-slate-200 rounded flex items-center justify-center text-slate-400"><UploadIcon className="w-4 h-4"/></div>
+                                    <div className="w-10 h-10 bg-white rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-300 group-hover:text-indigo-300 group-hover:border-indigo-300 transition-colors"><UploadIcon className="w-5 h-5"/></div>
                                 )}
                                 <div className="min-w-0">
-                                    <p className="text-xs font-medium text-slate-700 truncate">{leftLogoFileName || "Left Logo"}</p>
-                                    <label htmlFor="left-logo-edit" className="text-[10px] text-indigo-600 cursor-pointer hover:underline">
-                                        {leftLogoDataUrl ? "Change" : "Upload"}
+                                    <p className="text-xs font-semibold text-slate-700 truncate">{leftLogoFileName || "Left Logo"}</p>
+                                    <label htmlFor="left-logo-edit" className="text-[10px] font-bold text-indigo-600 cursor-pointer hover:underline uppercase tracking-wide">
+                                        {leftLogoDataUrl ? "Replace" : "Upload"}
                                     </label>
                                     <input id="left-logo-edit" type="file" className="hidden" accept="image/*" onChange={handleLeftLogoChange} />
                                 </div>
                              </div>
                              {leftLogoDataUrl && (
-                                 <button onClick={handleRemoveLeftLogo} className="text-slate-400 hover:text-red-500 p-1.5"><span className="sr-only">Remove</span>×</button>
+                                 <button onClick={handleRemoveLeftLogo} className="text-slate-300 hover:text-red-500 p-2"><span className="sr-only">Remove</span>×</button>
                              )}
                         </div>
                         {/* Right Logo */}
-                        <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100">
+                        <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200 hover:border-indigo-200 transition-colors group">
                              <div className="flex items-center gap-3 overflow-hidden">
                                 {rightLogoDataUrl ? (
-                                    <img src={rightLogoDataUrl} className="w-8 h-8 object-contain bg-white rounded border border-slate-200 p-0.5" />
+                                    <div className="w-10 h-10 bg-white rounded-lg border border-slate-200 p-1 flex items-center justify-center">
+                                        <img src={rightLogoDataUrl} className="max-w-full max-h-full object-contain" />
+                                    </div>
                                 ) : (
-                                    <div className="w-8 h-8 bg-slate-200 rounded flex items-center justify-center text-slate-400"><UploadIcon className="w-4 h-4"/></div>
+                                    <div className="w-10 h-10 bg-white rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-300 group-hover:text-indigo-300 group-hover:border-indigo-300 transition-colors"><UploadIcon className="w-5 h-5"/></div>
                                 )}
                                 <div className="min-w-0">
-                                    <p className="text-xs font-medium text-slate-700 truncate">{rightLogoFileName || "Right Logo"}</p>
-                                    <label htmlFor="right-logo-edit" className="text-[10px] text-indigo-600 cursor-pointer hover:underline">
-                                        {rightLogoDataUrl ? "Change" : "Upload"}
+                                    <p className="text-xs font-semibold text-slate-700 truncate">{rightLogoFileName || "Right Logo"}</p>
+                                    <label htmlFor="right-logo-edit" className="text-[10px] font-bold text-indigo-600 cursor-pointer hover:underline uppercase tracking-wide">
+                                        {rightLogoDataUrl ? "Replace" : "Upload"}
                                     </label>
                                      <input id="right-logo-edit" type="file" className="hidden" accept="image/*" onChange={handleRightLogoChange} />
                                 </div>
                              </div>
                               {rightLogoDataUrl && (
-                                 <button onClick={handleRemoveRightLogo} className="text-slate-400 hover:text-red-500 p-1.5"><span className="sr-only">Remove</span>×</button>
+                                 <button onClick={handleRemoveRightLogo} className="text-slate-300 hover:text-red-500 p-2"><span className="sr-only">Remove</span>×</button>
                              )}
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-4">
                          <button onClick={() => setShowThemeEditor(!showThemeEditor)} className={secondaryButtonStyle}>
                             <PaletteIcon className="w-4 h-4 text-indigo-500" /> Colors
                         </button>
-                         <button onClick={handleDownload} className={`${secondaryButtonStyle} !bg-emerald-50 !text-emerald-700 !border-emerald-200 hover:!bg-emerald-100`}>
-                            <DownloadIcon className="w-4 h-4" /> Download
+                         <button onClick={handleDownload} className={`${secondaryButtonStyle} !bg-emerald-50 !text-emerald-700 !border-emerald-200 hover:!bg-emerald-100 hover:!border-emerald-300`}>
+                            <DownloadIcon className="w-4 h-4" /> Export
                         </button>
                     </div>
 
                     {showThemeEditor && (
-                         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-lg animate-fadeInUp">
-                             <div className="flex justify-between items-center mb-3">
-                                 <h3 className="font-bold text-slate-700 text-sm">Theme Editor</h3>
-                                 <button onClick={() => setShowThemeEditor(false)} className="text-slate-400 hover:text-slate-600">×</button>
+                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm lg:absolute lg:inset-auto lg:top-1/2 lg:left-full lg:ml-4 lg:-translate-y-1/2 p-4">
+                             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl animate-scaleIn w-full max-w-sm lg:w-80 relative">
+                                 <div className="flex justify-between items-center mb-4">
+                                     <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><PaletteIcon className="w-4 h-4"/> Theme Editor</h3>
+                                     <button onClick={() => setShowThemeEditor(false)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+                                 </div>
+                                 <ThemeEditor theme={posterData.theme} onThemeChange={handleThemeChange} />
                              </div>
-                             <ThemeEditor theme={posterData.theme} onThemeChange={handleThemeChange} />
                          </div>
                     )}
                  </div>
 
-                 <div className="pt-4 border-t border-slate-100">
-                      <button onClick={handleStartOver} className="w-full text-xs text-slate-400 hover:text-slate-600 flex items-center justify-center gap-1 py-2">
-                          <RestartIcon className="w-3 h-3" /> Start Over
+                 <div className="pt-6 border-t border-slate-100">
+                      <button onClick={handleStartOver} className="w-full text-xs font-medium text-slate-400 hover:text-red-500 flex items-center justify-center gap-2 py-2 transition-colors">
+                          <RestartIcon className="w-3.5 h-3.5" /> Start New Design
                       </button>
                  </div>
               </div>
             ) : (
               /* --- INITIAL GENERATION MODE --- */
-              <div className="space-y-6">
-                 {/* Steps visualizer? Maybe overkill. Let's keep it clean. */}
+              <div className="space-y-8 py-4">
                  
                  {/* Step 1 */}
                  <div className={cardStyle}>
                     <label className={labelStyle}>1. Research Paper</label>
-                    <label className={`relative flex flex-col items-center justify-center w-full h-36 border-2 border-dashed rounded-xl cursor-pointer transition-all group overflow-hidden ${fileName ? 'border-emerald-400 bg-emerald-50/50' : 'border-slate-300 bg-slate-50 hover:bg-white hover:border-indigo-400'}`}>
+                    <label className={`relative flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-xl cursor-pointer transition-all group overflow-hidden ${fileName ? 'border-emerald-400 bg-emerald-50/30' : 'border-slate-300 bg-slate-50 hover:bg-white hover:border-indigo-400'}`}>
                         {fileName ? (
-                             <div className="text-center p-4 z-10">
-                                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mx-auto mb-2">
-                                     <ClipboardCheckIcon className="w-6 h-6 text-emerald-500" />
+                             <div className="text-center p-4 z-10 animate-fadeIn">
+                                <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-md mx-auto mb-3">
+                                     <ClipboardCheckIcon className="w-7 h-7 text-emerald-500" />
                                 </div>
-                                <p className="text-sm font-semibold text-emerald-800 truncate max-w-[200px]">{fileName}</p>
-                                <p className="text-xs text-emerald-600 mt-0.5">Click to replace</p>
+                                <p className="text-sm font-bold text-emerald-800 truncate max-w-[200px]">{fileName}</p>
+                                <p className="text-xs text-emerald-600 mt-1 font-medium">Click to replace</p>
                              </div>
                         ) : (
                              <div className="text-center p-4 z-10">
-                                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mx-auto mb-3 group-hover:scale-110 transition-transform text-indigo-500">
+                                <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm mx-auto mb-3 group-hover:scale-110 transition-transform text-indigo-500">
                                      <UploadIcon className="w-6 h-6" />
                                 </div>
-                                <p className="text-sm font-medium text-slate-700">Drop PDF or DOCX here</p>
-                                <p className="text-xs text-slate-400 mt-1">Max 10MB</p>
+                                <p className="text-sm font-bold text-slate-700">Upload PDF / DOCX</p>
+                                <p className="text-xs text-slate-400 mt-1 font-medium">Max 10MB</p>
                              </div>
                         )}
                         <input type="file" className="hidden" accept=".txt,.md,.docx,.pdf" onChange={handleFileChange} />
@@ -553,7 +647,7 @@ const App: React.FC = () => {
 
                  {/* Step 2 */}
                  <div className={cardStyle}>
-                     <label className={labelStyle}>2. Design Style</label>
+                     <label className={labelStyle}>2. Design Direction</label>
                      <textarea
                         rows={3}
                         className={inputStyle}
@@ -566,34 +660,34 @@ const App: React.FC = () => {
                  {/* Step 3 */}
                  <div className={cardStyle}>
                      <label className={labelStyle}>3. Logos (Optional)</label>
-                     <div className="flex gap-3">
-                        <label className="flex-1 h-20 border border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition relative overflow-hidden">
-                             {leftLogoDataUrl ? <img src={leftLogoDataUrl} className="h-full w-full object-contain p-2" /> : <span className="text-xs text-slate-400">Left Logo</span>}
+                     <div className="flex gap-4">
+                        <label className="flex-1 h-24 border border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition relative overflow-hidden group">
+                             {leftLogoDataUrl ? <img src={leftLogoDataUrl} className="h-full w-full object-contain p-2" /> : <div className="flex flex-col items-center"><UploadIcon className="w-4 h-4 text-slate-300 mb-1 group-hover:text-indigo-400"/><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide group-hover:text-indigo-500">Left</span></div>}
                              <input type="file" className="hidden" accept="image/*" onChange={handleLeftLogoChange} />
                         </label>
-                         <label className="flex-1 h-20 border border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition relative overflow-hidden">
-                             {rightLogoDataUrl ? <img src={rightLogoDataUrl} className="h-full w-full object-contain p-2" /> : <span className="text-xs text-slate-400">Right Logo</span>}
+                         <label className="flex-1 h-24 border border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition relative overflow-hidden group">
+                             {rightLogoDataUrl ? <img src={rightLogoDataUrl} className="h-full w-full object-contain p-2" /> : <div className="flex flex-col items-center"><UploadIcon className="w-4 h-4 text-slate-300 mb-1 group-hover:text-indigo-400"/><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide group-hover:text-indigo-500">Right</span></div>}
                              <input type="file" className="hidden" accept="image/*" onChange={handleRightLogoChange} />
                         </label>
                      </div>
                  </div>
 
                  {error && (
-                    <div className="bg-red-50 border border-red-100 p-3 rounded-lg flex gap-3 items-start animate-pulse">
+                    <div className="bg-red-50 border border-red-100 p-4 rounded-xl flex gap-3 items-start animate-pulse">
                          <div className="text-red-500 mt-0.5">⚠️</div>
-                         <p className="text-xs text-red-700 leading-relaxed">{error}</p>
+                         <p className="text-xs font-medium text-red-700 leading-relaxed">{error}</p>
                     </div>
                  )}
 
                  <button
                     onClick={handleInitialSubmit}
                     disabled={isGenerateDisabled}
-                    className={`w-full py-4 rounded-xl font-bold text-base shadow-xl shadow-indigo-200 transition-all transform flex items-center justify-center gap-2 ${isGenerateDisabled ? 'bg-slate-300 text-white cursor-not-allowed shadow-none' : 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:scale-[1.02] hover:shadow-indigo-300'}`}
+                    className={`w-full py-4 rounded-xl font-bold text-base shadow-xl shadow-indigo-200 transition-all transform flex items-center justify-center gap-2 ${isGenerateDisabled ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:scale-[1.02] hover:shadow-indigo-300'}`}
                  >
                     {isLoading ? (
                          <div className="flex items-center gap-2">
-                             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                             <span>Designing...</span>
+                             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                             <span>Creating Design...</span>
                          </div>
                     ) : (
                         <>
@@ -607,17 +701,38 @@ const App: React.FC = () => {
       </aside>
 
       {/* --- MAIN PREVIEW AREA (WORKSPACE) --- */}
-      <main className="flex-grow bg-slate-100 relative overflow-hidden flex flex-col">
+      <main className="flex-grow bg-slate-50 relative overflow-hidden flex flex-col" ref={workspaceRef}>
         {/* Workspace Background Pattern */}
-        <div className="absolute inset-0 bg-dot-pattern opacity-40 pointer-events-none"></div>
+        <div className="absolute inset-0 bg-dot-pattern opacity-60 pointer-events-none"></div>
         
-        <div className="flex-grow overflow-auto p-4 lg:p-12 flex items-start justify-center relative z-10">
+        {/* Zoom Controls */}
+        {posterData && !isDownloading && (
+             <div className="absolute bottom-6 right-6 z-40 flex items-center gap-2 bg-white p-1.5 rounded-xl shadow-lg border border-slate-100">
+                <button onClick={handleZoomOut} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition"><ZoomOutIcon className="w-5 h-5" /></button>
+                <span className="text-xs font-bold font-mono text-slate-500 w-12 text-center">{Math.round(zoom * 100)}%</span>
+                <button onClick={handleZoomIn} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition"><ZoomInIcon className="w-5 h-5" /></button>
+             </div>
+        )}
+
+        {/* Scrollable Container */}
+        {/* CHANGED: Removed items-center, added p-0 with explicit top spacing in transform, changed flex layout to allow top-aligned scrolling */}
+        <div className="flex-grow overflow-auto flex justify-center relative z-10 scrollbar-thin">
              {isLoading && !posterData ? (
-                 <div className="flex flex-col items-center justify-center h-full animate-fadeIn">
+                 <div className="flex flex-col items-center justify-center h-full animate-fadeIn w-full max-w-md">
                      <Loader message={loadingMessage} />
                  </div>
              ) : posterData ? (
-                 <div className="animate-scaleIn origin-top w-full flex justify-center min-h-min pb-20">
+                 /* CHANGED: transform origin-top instead of origin-center to prevent top cutoff when zoomed */
+                 <div 
+                    className="origin-top transition-transform duration-300 mb-20"
+                    style={{ 
+                        transform: isDownloading ? 'scale(1)' : `scale(${zoom})`, 
+                        marginTop: isDownloading ? '0px' : '40px',
+                        // Force center if downloading
+                        marginLeft: isDownloading ? 'auto' : undefined,
+                        marginRight: isDownloading ? 'auto' : undefined
+                    }}
+                 >
                      <PosterDisplay 
                         data={posterData} 
                         ref={posterRef} 
@@ -628,27 +743,11 @@ const App: React.FC = () => {
                         onAddSection={handleAddSection}
                         onDeleteSection={handleDeleteSection}
                         onReorderSections={handleReorderSections}
-                        onEditStart={history.snapshot}
+                        onEditStart={() => history.snapshot()}
                      />
                  </div>
-             ) : (
-                 <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                     <div className="w-32 h-32 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center mb-6">
-                        <SparklesIcon className="w-12 h-12 text-slate-200" />
-                     </div>
-                     <h3 className="text-lg font-medium text-slate-500">Your Design Workspace</h3>
-                     <p className="text-sm">Upload a paper to begin.</p>
-                 </div>
-             )}
+             ) : null}
         </div>
-        
-        {/* Helper Badge */}
-        {posterData && (
-             <div className="absolute bottom-6 right-6 bg-white/80 backdrop-blur border border-slate-200 px-4 py-2 rounded-full shadow-lg text-xs font-medium text-slate-500 flex items-center gap-2 z-20 pointer-events-none">
-                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                 A3 Portrait (300 DPI Ready)
-             </div>
-        )}
       </main>
     </div>
   );

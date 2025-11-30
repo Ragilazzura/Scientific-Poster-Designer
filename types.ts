@@ -61,6 +61,7 @@ export interface SectionDesign {
 }
 
 export interface PosterSection {
+  id: string; // Unique identifier for Drag and Drop
   title: string;
   content: string;
   column: '1' | '2' | '3';
@@ -87,4 +88,5 @@ export interface PosterData {
   theme: PosterTheme;
   sections: PosterSection[];
   contactInfo: ContactInfo;
+  warnings?: string[]; // New field for AI feedback on content quality
 }
