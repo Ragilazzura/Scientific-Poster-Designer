@@ -342,41 +342,81 @@ const App: React.FC = () => {
     if (posterRef.current) {
         const wasEditing = isEditing;
         if (wasEditing) setIsEditing(false);
-        
-        // 1. Trigger Re-render at 100% scale (no zoom)
+
         setIsDownloading(true);
+        // Tampilkan loading visual sederhana di UI (jika ada state untuk itu)
+        // atau kita gunakan console log untuk memantau
 
         const element = posterRef.current;
-        
-        // 2. Wait for state update and layout paint
+
+        // KITA KURANGI WAKTU TUNGGU JADI 800ms (0.8 detik)
+        // Agar tidak dianggap popup spam oleh browser
         setTimeout(() => {
-            // Updated to scale 1 because the element itself is now 1753px wide (exact requested size)
-            // No need to upscale if the CSS width matches the target output.
-            
+            console.log("Mulai proses render html2canvas..."); // Cek Console browser (F12)
+
             html2canvas(element, {
                 scale: 1, 
-                useCORS: true, 
+                useCORS: true,
                 backgroundColor: null,
-                width: element.offsetWidth, // Explicit width from element (1753px)
-                height: element.offsetHeight, // Explicit height
-                windowWidth: element.offsetWidth + 100, // Virtual window size
-                windowHeight: element.offsetHeight + 100,
-            }).then((canvas: HTMLCanvasElement) => {
-                const link = document.createElement('a');
-                link.download = 'scientific-poster-1753x2480.png';
-                link.href = canvas.toDataURL('image/png');
-                link.click();
                 
-                // 3. Restore state
+                // Ukuran Pasti
+                width: 1753, 
+                height: element.scrollHeight,
+                
+                // Posisi Pasti
+                x: 0,
+                y: 0,
+                scrollX: 0,
+                scrollY: 0,
+                
+                // Logging aktif untuk melihat error di console
+                logging: true, 
+
+                onclone: (clonedDoc) => {
+                    console.log("Sedang menyiapkan clone dokumen...");
+                    const clonedElement = clonedDoc.querySelector('[data-id="poster-root"]') as HTMLElement;
+                    if (clonedElement) {
+                        // Bersihkan style yang mengganggu
+                        clonedElement.style.boxShadow = 'none';
+                        clonedElement.style.margin = '0';
+                        clonedElement.style.transform = 'none';
+                        clonedElement.style.borderRadius = '0';
+                        clonedElement.style.width = '1753px';
+                        clonedElement.style.minHeight = '2480px';
+                        
+                        // --- PERBAIKAN KRUSIAL ---
+                        // Matikan backdrop-filter saat render. 
+                        // Efek ini sering bikin html2canvas macet/hang.
+                        clonedElement.style.backdropFilter = 'none';
+                        (clonedElement.style as any).webkitBackdropFilter = 'none';
+                    }
+                }
+
+            }).then((canvas: HTMLCanvasElement) => {
+                console.log("Render selesai. Memulai download...");
+                
+                try {
+                    const link = document.createElement('a');
+                    link.download = `Scientific-Poster-${new Date().toISOString().slice(0,10)}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    document.body.appendChild(link); // Append dulu ke body (fix untuk Firefox/beberapa browser)
+                    link.click();
+                    document.body.removeChild(link); // Hapus setelah klik
+                } catch (e) {
+                    console.error("Gagal saat trigger download:", e);
+                    alert("Gagal mendownload file. Cek console.");
+                }
+
                 setIsDownloading(false);
                 if (wasEditing) setIsEditing(true);
+
             }).catch((err: Error) => {
-                console.error("Failed to download poster:", err);
-                setError("Sorry, there was an issue downloading the poster image.");
+                console.error("HTML2Canvas Error:", err);
+                alert("Terjadi kesalahan saat merender poster. Cek Console (F12) untuk detail.");
                 setIsDownloading(false);
                 if (wasEditing) setIsEditing(true);
             });
-        }, 500); // 500ms delay to allow render cycle to finish at scale(1)
+        }, 800); // Timeout dikurangi ke 800ms
     }
   }, [isEditing]);
   
