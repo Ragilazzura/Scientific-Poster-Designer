@@ -488,7 +488,8 @@ const SectionCard: React.FC<{
     onDragEnd: (e: React.DragEvent) => void;
     isDragged: boolean;
     dropIndicator: 'top' | 'bottom' | null;
-}> = ({ section, index, theme, isEditing, onUpdate, onDelete, onEditStart, onDragStart, onDragOver, onDrop, onDragEnd, isDragged, dropIndicator }) => {
+    fontSettings: { title: number; body: number }; // NEW PROP
+}> = ({ section, index, theme, isEditing, onUpdate, onDelete, onEditStart, onDragStart, onDragOver, onDrop, onDragEnd, isDragged, dropIndicator, fontSettings }) => {
     
     const iconKey = section.design?.icon || Object.keys(defaultSectionIconMap).find(k => section.title.toLowerCase().includes(k)) || 'clipboard';
     const Icon = iconMap[defaultSectionIconMap[iconKey] || iconKey] || iconMap['clipboard'];
@@ -590,11 +591,8 @@ const SectionCard: React.FC<{
                 onDragStart={(e) => {
                     if (isEditing) {
                         e.stopPropagation();
-                        // IMPORTANT: Set data for Firefox compatibility
                         e.dataTransfer.setData("text/plain", section.id); 
                         e.dataTransfer.effectAllowed = "move";
-                        // Set drag image to be the card itself but clearer? 
-                        // Browser default is usually fine.
                         onDragStart(e, section.id);
                     }
                 }}
@@ -618,13 +616,14 @@ const SectionCard: React.FC<{
                         <Icon className="w-5 h-5 mr-3 flex-shrink-0" />
                         {isEditing ? (
                             <input 
-                                className="font-bold text-lg bg-transparent border-b border-white/20 focus:outline-none focus:border-white/80 w-full uppercase tracking-wide placeholder-current/50"
+                                className="font-bold bg-transparent border-b border-white/20 focus:outline-none focus:border-white/80 w-full uppercase tracking-wide placeholder-current/50"
+                                style={{ fontSize: `${fontSettings.title}px` }}
                                 value={section.title}
                                 onChange={(e) => onUpdate(index, 'title', e.target.value)}
                                 onFocus={onEditStart}
                             />
                         ) : (
-                            <h3 className="font-bold text-lg uppercase tracking-wide">{section.title}</h3>
+                            <h3 className="font-bold uppercase tracking-wide" style={{ fontSize: `${fontSettings.title}px` }}>{section.title}</h3>
                         )}
                     </div>
                     {isEditing && (
@@ -645,9 +644,10 @@ const SectionCard: React.FC<{
                     )}
                 </div>
 
-                {/* Settings Panel (Inline) */}
+                {/* Settings Panel */}
                 {isEditing && showSettings && (
                      <div className="bg-slate-50 border-b border-slate-200 p-3 flex flex-wrap gap-4 text-[11px] shadow-inner animate-fadeIn">
+                         {/* ... (Settings buttons same as before) ... */}
                          <div>
                             <label className="block font-semibold text-slate-500 mb-1 uppercase tracking-wider">Style</label>
                             <div className="flex gap-1">
@@ -711,19 +711,20 @@ const SectionCard: React.FC<{
                 <div className="p-4 space-y-4">
                     {isEditing ? (
                         <textarea 
-                            className="w-full min-h-[120px] mb-4 p-3 bg-white border border-slate-200 rounded-md text-slate-800 text-xs leading-relaxed resize-y focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none transition-all shadow-sm"
+                            className="w-full min-h-[120px] mb-4 p-3 bg-white border border-slate-200 rounded-md text-slate-800 leading-relaxed resize-y focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none transition-all shadow-sm"
+                            style={{ fontSize: `${fontSettings.body}px` }}
                             value={localContent}
                             onChange={handleContentChange}
                             onBlur={handleBlur}
                             onFocus={onEditStart}
                         />
                     ) : (
-                        <div className="text-sm leading-relaxed text-left whitespace-pre-line break-words hyphens-auto" style={{ color: theme.sectionBodyColor }}>
+                        <div className="leading-relaxed text-left whitespace-pre-line break-words hyphens-auto" style={{ color: theme.sectionBodyColor, fontSize: `${fontSettings.body}px` }}>
                              <MarkdownText text={section.content} />
                         </div>
                     )}
 
-                    {/* Visuals Grid */}
+                    {/* Visuals Grid (same as before) */}
                     {section.visuals && section.visuals.length > 0 && (
                         <div className={`grid gap-3 ${section.visuals.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                             {section.visuals.map((vis, vIdx) => (
@@ -790,10 +791,8 @@ const SectionCard: React.FC<{
             
             {dropIndicator === 'bottom' && <DropPlaceholder />}
 
-            {/* Lightbox for viewing */}
             {lightboxVisual && <Lightbox visual={lightboxVisual} onClose={() => setLightboxVisual(null)} />}
             
-            {/* Chart Editor Modal */}
             {editingVisualIndex !== null && section.visuals?.[editingVisualIndex] && (
                 <ChartEditModal 
                     visual={section.visuals[editingVisualIndex]} 
@@ -814,11 +813,57 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
     
   const [sections, setSections] = useState(data.sections);
 
+  // --- STATE RESIZE HEADER ---
+  const [headerPaddingY, setHeaderPaddingY] = useState(48);
+  const [contentBoxWidth, setContentBoxWidth] = useState(900);
+  const [leftLogoSize, setLeftLogoSize] = useState(128);
+  const [rightLogoSize, setRightLogoSize] = useState(128);
+  
+  // --- STATE FONTS ---
+  const [titleFS, setTitleFS] = useState(48); // px
+  const [authorFS, setAuthorFS] = useState(16); // px
+  const [sectionTitleFS, setSectionTitleFS] = useState(20); // px
+  const [sectionBodyFS, setSectionBodyFS] = useState(14); // px
+
+  const [isResizingHeader, setIsResizingHeader] = useState<'y' | 'content-width' | 'left-logo' | 'right-logo' | null>(null);
+
+  // Efek Mouse Move Global untuk Dragging
+  useEffect(() => {
+      const handleMouseMove = (e: MouseEvent) => {
+          if (!isResizingHeader) return;
+
+          if (isResizingHeader === 'y') {
+              setHeaderPaddingY(prev => Math.max(20, prev + e.movementY));
+          } else if (isResizingHeader === 'content-width') {
+              setContentBoxWidth(prev => Math.max(300, Math.min(1600, prev + (e.movementX * 2))));
+          } else if (isResizingHeader === 'left-logo') {
+              setLeftLogoSize(prev => Math.max(64, Math.min(300, prev + e.movementX)));
+          } else if (isResizingHeader === 'right-logo') {
+              setRightLogoSize(prev => Math.max(64, Math.min(300, prev - e.movementX)));
+          }
+      };
+
+      const handleMouseUp = () => {
+          setIsResizingHeader(null);
+          document.body.style.cursor = 'default';
+      };
+
+      if (isResizingHeader) {
+          window.addEventListener('mousemove', handleMouseMove);
+          window.addEventListener('mouseup', handleMouseUp);
+      }
+
+      return () => {
+          window.removeEventListener('mousemove', handleMouseMove);
+          window.removeEventListener('mouseup', handleMouseUp);
+      };
+  }, [isResizingHeader]);
+
   useEffect(() => {
       setSections(data.sections);
   }, [data.sections]);
 
-  // Drag and Drop State (ID-based)
+  // Drag and Drop Logic (Standard)
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
 
@@ -828,7 +873,6 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
   };
 
   const handleDragEnd = (e: React.DragEvent) => {
-      // Crucial: reset state to remove transparency effects
       setDraggedId(null);
       setDropTarget(null);
   };
@@ -836,36 +880,24 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
   const handleDragOverSection = (e: React.DragEvent, targetId: string) => {
       e.preventDefault();
       e.stopPropagation();
-      
       if (draggedId === null || draggedId === targetId) return;
-
       const rect = e.currentTarget.getBoundingClientRect();
       const midPoint = rect.top + rect.height / 2;
       const position = e.clientY < midPoint ? 'top' : 'bottom';
-
       setDropTarget({ id: targetId, position });
   };
   
-  // NEW: Handle dragging over a column background (to drop at end or empty column)
   const handleDragOverColumn = (e: React.DragEvent, columnId: '1' | '2') => {
       e.preventDefault();
       e.stopPropagation();
-      
       if (draggedId === null) return;
-      
       const columnSections = sections.filter(s => s.column === columnId);
-      
-      // If column is empty, we need a special target
       if (columnSections.length === 0) {
-          setDropTarget({ id: `column-${columnId}-end`, position: 'bottom' }); // Special ID for empty column
+          setDropTarget({ id: `column-${columnId}-end`, position: 'bottom' }); 
           return;
       }
-
-      // If dragging near the bottom of the column (below the last item)
       const lastSection = columnSections[columnSections.length - 1];
       const rect = e.currentTarget.getBoundingClientRect();
-      
-      // If pointer is in the bottom 20% of the container or below the last element visually
       if (e.clientY > rect.bottom - 100) {
            setDropTarget({ id: lastSection.id, position: 'bottom' });
       }
@@ -874,90 +906,47 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
   const handleDropSection = (e: React.DragEvent, targetId: string) => {
       e.preventDefault();
       e.stopPropagation();
-      
-      if (draggedId === null || dropTarget === null) {
-          handleDragEnd(e);
-          return;
-      }
-
+      if (draggedId === null || dropTarget === null) { handleDragEnd(e); return; }
       const draggedIndex = sections.findIndex(s => s.id === draggedId);
-      if (draggedIndex === -1) {
-          handleDragEnd(e);
-          return;
-      }
-
+      if (draggedIndex === -1) { handleDragEnd(e); return; }
       const newSections = [...sections];
-      const movedItem = { ...newSections[draggedIndex] }; // Clone to avoid mutation issues
-
-      // 1. Remove from old pos
+      const movedItem = { ...newSections[draggedIndex] }; 
       newSections.splice(draggedIndex, 1);
-
-      // 2. Determine Insertion
       let finalIndex = -1;
-      
-      // Special case: Dropping into empty column placeholder
       if (targetId.startsWith('column-')) {
            const targetCol = targetId.includes('1') ? '1' : '2';
            movedItem.column = targetCol;
-           // Append to end of sections, but logically it should be last of that column
-           // Since the array order implies display order (filtered by col), appending is fine IF we sort or if filtering preserves order
-           // Actually, we just need to push it to end if it's the only one.
-           // Better: Find index of last item in that column, insert after.
-           // If empty, just push.
            finalIndex = newSections.length;
       } else {
-           // Normal case: Dropping relative to another section
            const targetIndex = newSections.findIndex(s => s.id === targetId);
            if (targetIndex !== -1) {
                 const targetItem = newSections[targetIndex];
-                movedItem.column = targetItem.column; // Adopt target column
-                
+                movedItem.column = targetItem.column;
                 finalIndex = targetIndex;
-                if (dropTarget.position === 'bottom') {
-                    finalIndex += 1;
-                }
+                if (dropTarget.position === 'bottom') { finalIndex += 1; }
            }
       }
-
       if (finalIndex !== -1) {
           newSections.splice(finalIndex, 0, movedItem);
           setSections(newSections);
           onReorderSections?.(newSections);
       }
-      
       handleDragEnd(e);
   };
   
-  // Legacy handler if dropping directly on column background without "DropTarget" calculation
   const handleDropToColumnBackground = (e: React.DragEvent, columnId: '1'|'2') => {
        e.preventDefault();
        e.stopPropagation();
-       
-       if (draggedId === null) {
-           handleDragEnd(e);
-           return;
-       }
-       
-       // If we have a specific drop target from handleDragOverColumn, let handleDropSection handle it
-       if (dropTarget && (dropTarget.id.startsWith('column-') || dropTarget.id.includes(columnId))) {
-           handleDropSection(e, dropTarget.id);
-           return;
-       }
-       
-       // Fallback: Append to column
+       if (draggedId === null) { handleDragEnd(e); return; }
+       if (dropTarget && (dropTarget.id.startsWith('column-') || dropTarget.id.includes(columnId))) { handleDropSection(e, dropTarget.id); return; }
        const draggedIndex = sections.findIndex(s => s.id === draggedId);
-       if (draggedIndex === -1) {
-           handleDragEnd(e);
-           return;
-       }
-
+       if (draggedIndex === -1) { handleDragEnd(e); return; }
        const newSections = [...sections];
        const movedSection = { ...newSections[draggedIndex] };
-       
        if(movedSection.column !== columnId) {
             movedSection.column = columnId;
             newSections.splice(draggedIndex, 1);
-            newSections.push(movedSection); // Append
+            newSections.push(movedSection);
             setSections(newSections);
             onReorderSections?.(newSections);
        }
@@ -973,52 +962,112 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
         data-id="poster-root"
         className="relative shadow-[0_50px_100px_-20px_rgba(50,50,93,0.25),0_30px_60px_-30px_rgba(0,0,0,0.3)] mx-auto transition-transform flex flex-col poster-shadow"
         style={{
-           width: '1753px', // Specific Pixel Width (approx A3 @ 150dpi)
-           minHeight: '2480px', // Specific Pixel Height
+           width: '1753px', 
+           minHeight: '2480px',
            height: 'auto',
            backgroundColor: data.theme.backgroundColor,
            transformOrigin: 'top center'
         }}
         onDragOver={(e) => { e.preventDefault(); }}
-        onDrop={(e) => { 
-            e.preventDefault(); 
-            handleDragEnd(e);
-        }}
+        onDrop={(e) => { e.preventDefault(); handleDragEnd(e); }}
     >
-       {/* WARNINGS BANNER */}
        <WarningsBanner warnings={data.warnings} />
 
-       {/* Background Color Picker Overlay (Edit Mode) */}
+       {/* GLOBAL CONTROLS (BACKGROUND & TYPOGRAPHY) */}
        {isEditing && (
-            <div className="absolute top-4 right-4 z-30 group">
-                <button className="bg-white/90 backdrop-blur p-2 rounded-xl shadow-lg hover:bg-white transition border border-slate-200 flex items-center gap-2 group-hover:ring-2 ring-indigo-500/20" title="Change Poster Background">
-                    <div className="w-6 h-6 rounded-full border border-slate-200 shadow-inner" style={{ backgroundColor: data.theme.backgroundColor }}></div>
-                    <span className="text-xs font-semibold text-slate-600 pr-1">Background</span>
-                </button>
-                <div className="absolute right-0 top-full mt-2 p-4 bg-white rounded-xl shadow-xl hidden group-hover:block z-30 border border-slate-100 w-64 animate-fadeInUp">
-                     <p className="text-[10px] font-bold text-slate-400 mb-3 uppercase tracking-wider">Poster Background</p>
-                     <div className="flex gap-3 items-center bg-slate-50 p-2 rounded-lg border border-slate-200">
-                        <input 
-                            type="color" 
-                            value={data.theme.backgroundColor}
-                            onChange={(e) => onUpdateHeader?.('theme', {...data.theme, backgroundColor: e.target.value})} 
-                            className="w-10 h-10 cursor-pointer rounded-md overflow-hidden border-0"
-                        />
-                        <div className="flex flex-col">
-                            <span className="text-xs font-mono text-slate-700">{data.theme.backgroundColor}</span>
-                            <span className="text-[10px] text-slate-400">Click swatch to edit</span>
-                        </div>
-                     </div>
+            <div className="absolute top-4 right-4 z-30 flex flex-col gap-2 items-end">
+                {/* Background Picker */}
+                <div className="group relative">
+                    <button className="bg-white/90 backdrop-blur p-2 rounded-xl shadow-lg hover:bg-white transition border border-slate-200 flex items-center gap-2 group-hover:ring-2 ring-indigo-500/20" title="Change Background">
+                        <div className="w-6 h-6 rounded-full border border-slate-200 shadow-inner" style={{ backgroundColor: data.theme.backgroundColor }}></div>
+                    </button>
+                    <div className="absolute right-0 top-full mt-2 p-4 bg-white rounded-xl shadow-xl hidden group-hover:block z-30 border border-slate-100 w-64 animate-fadeInUp">
+                         <p className="text-[10px] font-bold text-slate-400 mb-3 uppercase tracking-wider">Canvas Background</p>
+                         <div className="flex gap-3 items-center bg-slate-50 p-2 rounded-lg border border-slate-200">
+                            <input 
+                                type="color" 
+                                value={data.theme.backgroundColor}
+                                onChange={(e) => onUpdateHeader?.('theme', {...data.theme, backgroundColor: e.target.value})} 
+                                className="w-10 h-10 cursor-pointer rounded-md overflow-hidden border-0"
+                            />
+                            <div className="flex flex-col">
+                                <span className="text-xs font-mono text-slate-700">{data.theme.backgroundColor}</span>
+                            </div>
+                         </div>
+                    </div>
+                </div>
+
+                {/* TYPOGRAPHY PANEL (NEW) */}
+                <div className="group relative">
+                    <button className="bg-white/90 backdrop-blur p-2 rounded-xl shadow-lg hover:bg-white transition border border-slate-200 flex items-center justify-center w-10 h-10 group-hover:ring-2 ring-indigo-500/20" title="Typography Settings">
+                        <span className="font-serif font-bold text-lg text-slate-700">Aa</span>
+                    </button>
+                    <div className="absolute right-0 top-full mt-2 p-5 bg-white rounded-xl shadow-xl hidden group-hover:block z-30 border border-slate-100 w-72 animate-fadeInUp">
+                         <p className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-wider flex items-center gap-2">
+                             <PencilIcon className="w-3 h-3" /> Typography Sizes
+                         </p>
+                         
+                         {/* Controls */}
+                         <div className="space-y-4">
+                             <div>
+                                 <div className="flex justify-between text-xs mb-1 font-medium text-slate-600">
+                                     <span>Poster Title</span>
+                                     <span className="text-slate-400">{titleFS}px</span>
+                                 </div>
+                                 <input type="range" min="24" max="120" step="2" value={titleFS} onChange={(e) => setTitleFS(Number(e.target.value))} className="w-full accent-indigo-600 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer" />
+                             </div>
+
+                             <div>
+                                 <div className="flex justify-between text-xs mb-1 font-medium text-slate-600">
+                                     <span>Authors / Meta</span>
+                                     <span className="text-slate-400">{authorFS}px</span>
+                                 </div>
+                                 <input type="range" min="10" max="32" step="1" value={authorFS} onChange={(e) => setAuthorFS(Number(e.target.value))} className="w-full accent-indigo-600 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer" />
+                             </div>
+
+                             <div className="pt-2 border-t border-slate-100">
+                                 <div className="flex justify-between text-xs mb-1 font-medium text-slate-600">
+                                     <span>Section Headers</span>
+                                     <span className="text-slate-400">{sectionTitleFS}px</span>
+                                 </div>
+                                 <input type="range" min="12" max="48" step="1" value={sectionTitleFS} onChange={(e) => setSectionTitleFS(Number(e.target.value))} className="w-full accent-indigo-600 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer" />
+                             </div>
+
+                             <div>
+                                 <div className="flex justify-between text-xs mb-1 font-medium text-slate-600">
+                                     <span>Body Content</span>
+                                     <span className="text-slate-400">{sectionBodyFS}px</span>
+                                 </div>
+                                 <input type="range" min="8" max="24" step="1" value={sectionBodyFS} onChange={(e) => setSectionBodyFS(Number(e.target.value))} className="w-full accent-indigo-600 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer" />
+                             </div>
+                         </div>
+                    </div>
                 </div>
             </div>
        )}
 
-      {/* 1. Header (Always Desktop Layout for Print) */}
+      {/* 1. Header */}
       <header 
         data-id="header-desktop"
-        className="w-full p-12 flex justify-between items-start gap-8 relative group/header transition-colors duration-300"
-        style={{ backgroundColor: data.theme.headerColor }}
+        className="w-full flex justify-between items-start gap-8 relative group/header transition-all duration-75 ease-linear"
+        style={{ 
+            backgroundColor: data.theme.headerColor,
+            paddingTop: `${headerPaddingY}px`,
+            paddingBottom: `${headerPaddingY}px`,
+            paddingLeft: '48px', 
+            paddingRight: '48px'
+        }}
       >
+        {/* RESIZE HANDLE - HEIGHT */}
+        {isEditing && (
+            <div
+                className="absolute bottom-0 left-0 w-full h-4 cursor-ns-resize flex items-center justify-center opacity-0 group-hover/header:opacity-100 hover:!opacity-100 transition-opacity z-50 hover:bg-white/10"
+                onMouseDown={(e) => { e.preventDefault(); setIsResizingHeader('y'); document.body.style.cursor = 'ns-resize'; }}
+            >
+                <div className="w-12 h-1 rounded-full bg-white/40 backdrop-blur-sm shadow-sm"></div>
+            </div>
+        )}
+
         {isEditing && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 opacity-0 group-hover/header:opacity-100 transition-opacity">
                 <div className="bg-white/90 backdrop-blur px-3 py-1.5 rounded-full shadow-lg border border-white/20 flex items-center gap-2 cursor-pointer">
@@ -1027,35 +1076,75 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
                         value={data.theme.headerColor}
                         onChange={(e) => onUpdateHeader?.('theme', {...data.theme, headerColor: e.target.value})} 
                         className="w-5 h-5 rounded-full cursor-pointer border-0 p-0"
-                        title="Change Header Color"
                     />
                     <span className="text-xs font-semibold text-slate-700">Header Color</span>
                 </div>
             </div>
         )}
 
-        {/* Left Logo */}
-         <div className="w-32 h-32 flex-shrink-0 flex items-start justify-center">
+        {/* LEFT LOGO */}
+         <div 
+            className="relative flex-shrink-0 flex items-start justify-center group/logo"
+            style={{ width: `${leftLogoSize}px`, height: `${leftLogoSize}px` }}
+         >
             {data.leftLogoUrl ? (
                 <img src={data.leftLogoUrl} alt="Left Logo" className="w-full h-full object-contain filter drop-shadow-md bg-white/95 rounded-xl p-2" />
             ) : <div className="w-full h-full"></div>}
+            
+            {isEditing && (
+                <div 
+                    className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-center justify-center bg-white/50 hover:bg-indigo-500 rounded-tl-lg shadow-sm opacity-0 group-hover/logo:opacity-100 transition-all z-50"
+                    onMouseDown={(e) => { e.preventDefault(); setIsResizingHeader('left-logo'); document.body.style.cursor = 'nwse-resize'; }}
+                >
+                    <div className="w-1.5 h-1.5 bg-slate-500 rounded-full"></div>
+                </div>
+            )}
          </div>
 
-         {/* Center Info Cards */}
-         <div className="flex-grow flex flex-col items-center justify-center text-center space-y-3 z-10 max-w-4xl">
+         {/* CENTER INFO */}
+         <div 
+            className="flex-grow flex flex-col items-center justify-center text-center space-y-3 z-10 relative group/content"
+            style={{
+                maxWidth: `${contentBoxWidth}px`, 
+                width: '100%',
+                transition: isResizingHeader ? 'none' : 'max-width 0.2s ease'
+            }}
+         >
+            {/* Width Handles */}
+            {isEditing && (
+                <>
+                    <div 
+                        className="absolute right-[-24px] top-0 bottom-0 w-6 cursor-ew-resize flex items-center justify-center opacity-0 group-hover/content:opacity-100 hover:!opacity-100 transition-opacity z-50"
+                        onMouseDown={(e) => { e.preventDefault(); setIsResizingHeader('content-width'); document.body.style.cursor = 'ew-resize'; }}
+                    >
+                        <div className="h-16 w-1.5 rounded-full bg-white/50 border border-white/20 shadow-sm hover:bg-indigo-400 hover:border-indigo-200 transition-colors"></div>
+                    </div>
+                    <div 
+                        className="absolute left-[-24px] top-0 bottom-0 w-6 cursor-ew-resize flex items-center justify-center opacity-0 group-hover/content:opacity-100 hover:!opacity-100 transition-opacity z-50"
+                        onMouseDown={(e) => { e.preventDefault(); setIsResizingHeader('content-width'); document.body.style.cursor = 'ew-resize'; }}
+                    >
+                         <div className="h-16 w-1.5 rounded-full bg-white/50 border border-white/20 shadow-sm hover:bg-indigo-400 hover:border-indigo-200 transition-colors"></div>
+                    </div>
+                </>
+            )}
+
             {/* Title */}
              {isEditing ? (
               <textarea
-                className="w-full bg-black/20 border border-white/30 rounded-xl text-center text-4xl font-extrabold p-4 focus:outline-none focus:border-white focus:bg-black/30 resize-none shadow-lg placeholder-white/50 text-white"
-                style={{ color: data.theme.titleColor }}
+                className="w-full bg-black/20 border border-white/30 rounded-xl text-center font-extrabold p-4 focus:outline-none focus:border-white focus:bg-black/30 resize-none shadow-lg placeholder-white/50 text-white overflow-hidden leading-tight"
+                style={{ color: data.theme.titleColor, fontSize: `${titleFS}px` }}
                 value={data.title}
-                onChange={(e) => onUpdateHeader?.('title', e.target.value)}
+                onChange={(e) => {
+                    onUpdateHeader?.('title', e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                }}
                 onFocus={onEditStart}
-                rows={2}
+                rows={1}
                 placeholder="Poster Title"
               />
             ) : (
-              <h1 className="text-4xl font-extrabold uppercase leading-tight tracking-tight drop-shadow-md break-words max-w-[90%]" style={{ color: data.theme.titleColor }}>
+              <h1 className="font-extrabold uppercase leading-tight tracking-tight drop-shadow-md break-words w-full" style={{ color: data.theme.titleColor, fontSize: `${titleFS}px` }}>
                 {data.title}
               </h1>
             )}
@@ -1064,60 +1153,73 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
             <div className={`rounded-lg py-2 px-6 shadow-sm w-full transition-colors ${isEditing ? 'bg-black/20 border border-white/30' : 'bg-white/10 backdrop-blur-sm border border-white/20'}`}>
                 {isEditing ? (
                     <input 
-                        className="w-full bg-transparent border-b border-white/40 text-center text-white text-base font-bold focus:outline-none focus:border-white placeholder-white/50"
+                        className="w-full bg-transparent border-b border-white/40 text-center text-white font-bold focus:outline-none focus:border-white placeholder-white/50"
+                        style={{ fontSize: `${authorFS}px` }}
                         value={data.authors.join(', ')}
                         onChange={(e) => onUpdateHeader?.('authors', e.target.value.split(', '))}
                         onFocus={onEditStart}
                         placeholder="Authors (comma separated)"
                     />
                 ) : (
-                    <p className="text-base font-bold text-white tracking-wide">{data.authors.join(', ')}</p>
+                    <p className="font-bold text-white tracking-wide" style={{ fontSize: `${authorFS}px` }}>{data.authors.join(', ')}</p>
                 )}
             </div>
 
-            {/* Dept & University - Stacked Vertically */}
+            {/* Dept & University */}
             <div className="flex flex-col gap-2 w-full">
-                {/* Department Card */}
                 <div className={`rounded-md py-1.5 px-4 shadow-sm w-full transition-colors ${isEditing ? 'bg-black/20 border border-white/30' : 'bg-white/5 backdrop-blur-sm border border-white/10'}`}>
                      {isEditing ? (
                         <input 
-                             className="w-full bg-transparent border-b border-white/40 text-center text-white text-sm font-medium focus:outline-none focus:border-white placeholder-white/50"
+                             className="w-full bg-transparent border-b border-white/40 text-center text-white font-medium focus:outline-none focus:border-white placeholder-white/50"
+                             style={{ fontSize: `${Math.max(10, authorFS - 2)}px` }}
                              value={data.department}
                              onChange={(e) => onUpdateHeader?.('department', e.target.value)}
                              onFocus={onEditStart}
                              placeholder="Department Name"
                         />
                     ) : (
-                        <p className="text-sm font-medium text-white/90">{data.department}</p>
+                        <p className="font-medium text-white/90" style={{ fontSize: `${Math.max(10, authorFS - 2)}px` }}>{data.department}</p>
                     )}
                 </div>
 
-                 {/* University Card */}
                  <div className={`rounded-md py-1.5 px-4 shadow-sm w-full transition-colors ${isEditing ? 'bg-black/20 border border-white/30' : 'bg-white/5 backdrop-blur-sm border border-white/10'}`}>
                      {isEditing ? (
                         <input 
-                             className="w-full bg-transparent border-b border-white/40 text-center text-white text-sm font-medium focus:outline-none focus:border-white placeholder-white/50"
+                             className="w-full bg-transparent border-b border-white/40 text-center text-white font-medium focus:outline-none focus:border-white placeholder-white/50"
+                             style={{ fontSize: `${Math.max(10, authorFS - 2)}px` }}
                              value={data.university}
                              onChange={(e) => onUpdateHeader?.('university', e.target.value)}
                              onFocus={onEditStart}
                              placeholder="University Name"
                         />
                     ) : (
-                        <p className="text-sm font-medium text-white/90">{data.university}</p>
+                        <p className="font-medium text-white/90" style={{ fontSize: `${Math.max(10, authorFS - 2)}px` }}>{data.university}</p>
                     )}
                 </div>
             </div>
          </div>
 
-         {/* Right Logo */}
-         <div className="w-32 h-32 flex-shrink-0 flex items-start justify-center">
+         {/* RIGHT LOGO */}
+         <div 
+            className="relative flex-shrink-0 flex items-start justify-center group/logo"
+            style={{ width: `${rightLogoSize}px`, height: `${rightLogoSize}px` }}
+         >
              {data.rightLogoUrl ? (
                 <img src={data.rightLogoUrl} alt="Right Logo" className="w-full h-full object-contain filter drop-shadow-md bg-white/95 rounded-xl p-2" />
             ) : <div className="w-full h-full"></div>}
+
+            {isEditing && (
+                <div 
+                    className="absolute bottom-0 left-0 w-6 h-6 cursor-nesw-resize flex items-center justify-center bg-white/50 hover:bg-indigo-500 rounded-tr-lg shadow-sm opacity-0 group-hover/logo:opacity-100 transition-all z-50"
+                    onMouseDown={(e) => { e.preventDefault(); setIsResizingHeader('right-logo'); document.body.style.cursor = 'nesw-resize'; }}
+                >
+                    <div className="w-1.5 h-1.5 bg-slate-500 rounded-full"></div>
+                </div>
+            )}
          </div>
       </header>
 
-      {/* 2. Main Content Grid (Always 2 Columns) */}
+      {/* 2. Main Content Grid */}
       <div 
         data-id="poster-grid"
         className="flex-grow p-10 flex flex-row gap-6 items-stretch relative"
@@ -1144,9 +1246,9 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
                        onDragEnd={handleDragEnd}
                        isDragged={draggedId === s.id}
                        dropIndicator={dropTarget?.id === s.id ? dropTarget.position : null}
+                       fontSettings={{ title: sectionTitleFS, body: sectionBodyFS }}
                    />
               ))}
-              {/* Empty Column Drop Placeholder */}
               {isEditing && dropTarget?.id === 'column-1-end' && (
                   <DropPlaceholder />
               )}
@@ -1185,9 +1287,9 @@ const PosterDisplay = forwardRef<HTMLDivElement, PosterDisplayProps>(({
                        onDragEnd={handleDragEnd}
                        isDragged={draggedId === s.id}
                        dropIndicator={dropTarget?.id === s.id ? dropTarget.position : null}
+                       fontSettings={{ title: sectionTitleFS, body: sectionBodyFS }}
                    />
               ))}
-              {/* Empty Column Drop Placeholder */}
               {isEditing && dropTarget?.id === 'column-2-end' && (
                   <DropPlaceholder />
               )}
