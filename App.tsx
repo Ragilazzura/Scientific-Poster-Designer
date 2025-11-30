@@ -5,7 +5,7 @@ import type { Chat } from '@google/genai';
 import PosterDisplay from './components/PosterDisplay';
 import Loader from './components/Loader';
 import ThemeEditor from './components/ThemeEditor';
-import { SparklesIcon, UploadIcon, InfoIcon, WandIcon, RestartIcon, DownloadIcon, PaletteIcon, ClipboardCheckIcon, PencilIcon, UndoIcon, RedoIcon, ZoomInIcon, ZoomOutIcon, LayersIcon, StarIcon } from './components/IconComponents';
+import { SparklesIcon, UploadIcon, InfoIcon, WandIcon, RestartIcon, DownloadIcon, PaletteIcon, ClipboardCheckIcon, PencilIcon, UndoIcon, RedoIcon, ZoomInIcon, ZoomOutIcon, LayersIcon, StarIcon, ChevronLeftIcon, ChevronRightIcon } from './components/IconComponents';
 import { useHistory } from './hooks/useHistory';
 
 // Declare global variables for CDN libraries
@@ -30,6 +30,9 @@ const App: React.FC = () => {
   // Version Control State
   const [versions, setVersions] = useState<PosterData[]>([]);
   const [currentVersionIndex, setCurrentVersionIndex] = useState<number>(0);
+
+  // Sidebar Toggle State
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
   // History Hook replaces the simple useState
   const history = useHistory<PosterData | null>(null);
@@ -443,11 +446,13 @@ const App: React.FC = () => {
   const secondaryButtonStyle = "w-full py-2.5 px-4 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 hover:text-slate-900 transition shadow-sm flex items-center justify-center gap-2 active:scale-95";
 
   return (
-    <div className="flex flex-col lg:flex-row bg-slate-50 font-sans h-screen overflow-hidden">
+    <div className="flex flex-col lg:flex-row bg-slate-50 font-sans h-screen overflow-hidden relative">
       
       {/* --- SIDEBAR / CONTROL PANEL --- */}
-      <aside className="w-full lg:w-[400px] xl:w-[440px] bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col h-full z-20 shrink-0 relative">
-        <div className="p-6 pb-2 shrink-0">
+      <aside 
+        className={`bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col h-full z-30 shrink-0 absolute lg:static lg:h-full transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-full lg:w-[400px] xl:w-[440px] translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0 overflow-hidden opacity-0 lg:opacity-100'}`}
+      >
+        <div className="p-6 pb-2 shrink-0 min-w-[350px]">
              {/* App Header */}
             <header className="flex items-center gap-4 pb-6 border-b border-slate-100">
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-indigo-200 ring-4 ring-indigo-50">
@@ -460,7 +465,7 @@ const App: React.FC = () => {
             </header>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 pt-0 scroll-smooth">
+        <div className="flex-1 overflow-y-auto p-6 pt-0 scroll-smooth min-w-[350px]">
             {posterData && chatSession ? (
               /* --- REVISION MODE --- */
               <div className="space-y-6 animate-fadeIn py-4">
@@ -700,6 +705,17 @@ const App: React.FC = () => {
         </div>
       </aside>
 
+      {/* --- SIDEBAR TOGGLE BUTTON --- */}
+      {posterData && (
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className={`absolute z-40 top-4 transition-all duration-300 p-2 bg-white rounded-r-lg shadow-md border border-slate-200 hover:bg-slate-50 text-slate-500 ${isSidebarOpen ? 'left-[400px] xl:left-[440px]' : 'left-0'}`}
+            title={isSidebarOpen ? "Hide Control Panel" : "Show Control Panel"}
+          >
+              {isSidebarOpen ? <ChevronLeftIcon className="w-5 h-5" /> : <ChevronRightIcon className="w-5 h-5" />}
+          </button>
+      )}
+
       {/* --- MAIN PREVIEW AREA (WORKSPACE) --- */}
       <main className="flex-grow bg-slate-50 relative overflow-hidden flex flex-col" ref={workspaceRef}>
         {/* Workspace Background Pattern */}
@@ -715,7 +731,6 @@ const App: React.FC = () => {
         )}
 
         {/* Scrollable Container */}
-        {/* CHANGED: Removed items-center, added p-0 with explicit top spacing in transform, changed flex layout to allow top-aligned scrolling */}
         <div className="flex-grow overflow-auto flex justify-center relative z-10 scrollbar-thin">
              {isLoading && !posterData ? (
                  <div className="flex flex-col items-center justify-center h-full animate-fadeIn w-full max-w-md">
